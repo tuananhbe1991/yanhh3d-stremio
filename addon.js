@@ -168,8 +168,87 @@ builder.defineCatalogHandler(async ({ extra }) => {
 
     const response = await client.get(url);
 
-    const metas = parseCatalog(response.data);
+    const metas = await (response.data);
+async function getMoviePoster(url) {
+  try {
+    const response = await client.get(url);
+    const $ = cheerio.load(response.data);
 
+    const poster =
+      $("meta[property='og:image']").attr("content") ||
+      $("meta[name='twitter:image']").attr("content") ||
+      $("img").first().attr("src") ||
+      $("img").first().attr("data-src");
+
+    return absoluteUrl(poster);
+  } catch (error) {
+    console.error("POSTER ERROR:", url, error.message);
+    return null;
+  }
+}
+
+
+async function parseCatalog(html) {
+  const $ = cheerio.load(html);
+
+  const movies = [];
+  const seen = new Set();
+
+  $("a[href]").each((_, element) => {
+    const a = $(element);
+    const href = absoluteUrl(a.attr("href"));
+
+    if (!isMovieUrl(href)) {
+      return;
+    }
+
+    if (/\/tap-\d+/i.test(href)) {
+      return;
+    }
+
+    const title =
+      a.find("h1,h2,h3,h4,h5,h6").first().text().trim() ||
+      a.text().replace(/\s+/g, " ").trim();
+
+    if (!title || title.length < 2) {
+      return;
+    }
+
+    if (seen.has(href)) {
+      return;
+    }
+
+    seen.add(href);
+
+    movies.push({
+      id: makeId(href),
+      type: "series",
+      name: title,
+      url: href
+    });
+  });
+
+  /*
+   * Lấy poster trực tiếp từ trang phim.
+   * Chỉ lấy 40 phim đầu để Render Free không bị quá tải.
+   */
+  const limited = movies.slice(0, 40);
+
+  const results = await Promise.all(
+    limited.map(async movie => {
+      const poster = await getMoviePoster(movie.url);
+
+      return {
+        id: movie.id,
+        type: "series",
+        name: movie.name,
+        poster: poster || undefined
+      };
+    })
+  );
+
+  return results;
+}
     return {
       metas: metas.slice(0, 100),
       cacheMaxAge: 300,
